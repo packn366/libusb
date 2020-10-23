@@ -1709,7 +1709,20 @@ static int winusb_get_device_list(struct libusb_context *ctx, struct discovered_
 				if (!pSetupDiGetDeviceRegistryPropertyA(*dev_info, &dev_info_data, SPDRP_ADDRESS,
 						NULL, (PBYTE)&port_nr, sizeof(port_nr), &size) || (size != sizeof(port_nr)))
 					usbi_warn(ctx, "could not retrieve port number for device '%s': %s", dev_id, windows_error_str(0));
-				r = init_device(dev, parent_dev, (uint8_t)port_nr, dev_info_data.DevInst);
+
+				// can't trust "port_nr" returned from ASMedia driver against the RTL-SDR dongle so try to search from 1 to 127
+				bool       rtlsdr        = false;
+				const char kRtlSdrPath[] = "\\\\?\\USB#VID_0BDA&PID_2838#";
+				priv = usbi_get_device_priv(dev);
+				if ((priv->path != NULL) && strncmp(priv->path, kRtlSdrPath, sizeof(kRtlSdrPath) - 1) == 0) {  // -1: exclude str terminator
+					rtlsdr  = true;
+					port_nr = 1;
+				}
+
+				do {
+					r = init_device(dev, parent_dev, (uint8_t)port_nr, dev_info_data.DevInst);
+				} while ((r == LIBUSB_ERROR_NO_DEVICE) && rtlsdr && (port_nr++ < 128)); // searching port no from 1 to 127 against the RTL-SDR dongle
+
 				if (r == LIBUSB_SUCCESS) {
 					// Append device to the list of discovered devices
 					discdevs = discovered_devs_append(*_discdevs, dev);
